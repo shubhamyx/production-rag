@@ -7,7 +7,7 @@ import uuid
 pc = Pinecone(api_key=PINECONE_API_KEY)
 index = pc.Index(INDEX_NAME)
 
-def ingest_documents(texts: list[str], source: str, namespace: str = "default"):
+def ingest_documents(texts: list[str], source: str, namespace: str = "default", category: str = "general", date: str = "2026"):
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=CHUNK_SIZE,
         chunk_overlap=CHUNK_OVERLAP,
@@ -27,7 +27,9 @@ def ingest_documents(texts: list[str], source: str, namespace: str = "default"):
                 "metadata": {
                     "text": chunk,
                     "source": source,
-                    "namespace": namespace
+                    "namespace": namespace,
+                    "category": category,
+                    "date": date
                 }
             })
 
