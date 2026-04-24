@@ -10,6 +10,7 @@ import tempfile
 import os
 from pinecone import Pinecone as PineconeClient
 from config import PINECONE_API_KEY, INDEX_NAME
+from reranker import retrieve_and_rerank
 
 app = FastAPI(title="Production RAG API", version="1.0.0")
 
@@ -86,29 +87,25 @@ async def ingest_pdf(
     finally:
         os.unlink(tmp_path)
 
-@app.post("/query", response_model=QueryResponse)
-def query(request: QueryRequest):
-    filter_by = None
-    if request.category:
-        filter_by = {"category": {"$eq": request.category}}
-    
-    contexts = retrieve(
+@app.post("/query/reranked", response_model=QueryResponse)
+def query_reranked(request: QueryRequest):
+    contexts = retrieve_and_rerank(
         query=request.question,
         namespace=request.namespace,
-        top_k=request.top_k,
-        filter_by=filter_by
+        top_k_retrieve=10,
+        top_k_final=3
     )
-    
+
     if not contexts:
         return QueryResponse(
             answer="No relevant context found.",
             sources=[],
             chunks_retrieved=0
         )
-    
+
     context_text = "\n\n".join([c["text"] for c in contexts])
     sources = list(set([c["source"] for c in contexts]))
-    
+
     prompt = f"""Answer the question based ONLY on the context below.
 If the answer is not in the context, say "I don't know based on the provided context."
 
@@ -124,7 +121,7 @@ Answer:"""
         messages=[{"role": "user", "content": prompt}],
         temperature=0.1
     )
-    
+
     return QueryResponse(
         answer=response.choices[0].message.content,
         sources=sources,
