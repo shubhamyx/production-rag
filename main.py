@@ -3,22 +3,17 @@ from pydantic import BaseModel
 from retriever import retrieve
 from ingest import ingest_documents
 from groq import Groq
-from config import GROQ_API_KEY
+from config import GROQ_API_KEY, PINECONE_API_KEY, INDEX_NAME
 from pypdf import PdfReader
-from retriever import retrieve    
+from pinecone import Pinecone as PineconeClient
 import tempfile
 import os
-from pinecone import Pinecone as PineconeClient
-from config import PINECONE_API_KEY, INDEX_NAME
-from reranker import retrieve_and_rerank
 
 app = FastAPI(title="Production RAG API", version="1.0.0")
 
 groq_client = Groq(api_key=GROQ_API_KEY)
-
 _pc = PineconeClient(api_key=PINECONE_API_KEY)
 _index = _pc.Index(INDEX_NAME)
-
 
 class QueryRequest(BaseModel):
     question: str
@@ -47,7 +42,6 @@ def get_stats():
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    
 
 @app.post("/ingest")
 async def ingest_pdf(
@@ -57,18 +51,18 @@ async def ingest_pdf(
 ):
     if not file.filename.endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files accepted")
-    
+
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
         content = await file.read()
         tmp.write(content)
         tmp_path = tmp.name
-    
+
     try:
         reader = PdfReader(tmp_path)
         full_text = ""
         for page in reader.pages:
             full_text += page.extract_text() + "\n"
-        
+
         count = ingest_documents(
             texts=[full_text],
             source=file.filename,
@@ -76,7 +70,7 @@ async def ingest_pdf(
             category=category,
             date="2026"
         )
-        
+
         return {
             "message": "Ingestion successful",
             "filename": file.filename,
@@ -87,13 +81,17 @@ async def ingest_pdf(
     finally:
         os.unlink(tmp_path)
 
-@app.post("/query/reranked", response_model=QueryResponse)
-def query_reranked(request: QueryRequest):
-    contexts = retrieve_and_rerank(
+@app.post("/query", response_model=QueryResponse)
+def query(request: QueryRequest):
+    filter_by = None
+    if request.category:
+        filter_by = {"category": {"$eq": request.category}}
+
+    contexts = retrieve(
         query=request.question,
         namespace=request.namespace,
-        top_k_retrieve=10,
-        top_k_final=3
+        top_k=request.top_k,
+        filter_by=filter_by
     )
 
     if not contexts:
